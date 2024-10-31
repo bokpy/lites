@@ -6,6 +6,21 @@ import re
 DEBUGEXIT=exit
 DEBUGPRINT=print
 
+B=120   # border width
+
+def DEBUG_SHOW_INT_ARRAY(a,title=''):
+	print(title)
+	for r in a:
+		for i in r:
+			if isinstance(i,int):
+				if abs(i) > 1000:
+					print(f'{i//1000:5}k',end='')
+					continue
+				print(f'{i:6}',end='')
+				continue
+			print(f'{i}',end='')
+		print()
+
 def SHOWFRAME(x, y=0, width=0, height=0,pend='\n'):
 	if not isinstance(x,int):
 		x,y, width, height = x
@@ -21,13 +36,6 @@ def try_int(val):
 		return int(val)
 	except ValueError:
 		return val.strip()
-
-
-# #_SHORT={"Absolute upper-left X":"X",
-#         "Absolute upper-left Y":'Y',
-#         "Relative upper-left X":"RX",
-#         "Relative upper-left Y":'RY'
-#         }
 
 #Id_re     =r'Window id: *(0x\d+)'
 AulX_re     =r'Absolute upper-left X: *(\d+)'
@@ -98,7 +106,6 @@ miniY=1 # Y Upper Left
 maxiX=2 # X Lower Rigth
 maxiY=3 # Y Lower Rigth
 
-B=2   # half border width
 
 def square_distance(ax,ay,bx,by):
 	dx=ax-bx
@@ -110,18 +117,27 @@ def between(lo,mid,hi):
 
 class WindowFrame(list):
 	def __init__(S,x0,y0=None,x1=None,y1=None,xywh=False):
-		list.__init__(S)
+		#list.__init__(S,[0,0,0,0])
 		if xywh:
 			if isinstance(y1,int):
-				S+=[x0,y0,x0+x1,y0+y1]
+				list.__init__(S,[x0,y0,x0+x1,y0+y1])
+				return
 			else:
 				x0,y0,w,h=x0
-				S+=[x0,y0,x0+w,y0+h]
+				list.__init__(S,[x0,y0,x0+w,y0+h])
 			return
 		if isinstance(y1,int):
-			S+=[x0,y0,x1,y1]
+			list.__init__(S,[x0,y0,x1,y1])
 			return
-		S+=list(x0)
+		list.__init__(S,list(x0))
+
+	def set(S,*args):
+		if isinstance(args[0],int):
+			for i in range(0,4):
+				S[i]=args[i]
+			return
+		for i in range(0,4):
+			S[i]=args[0][i]
 
 	def __str__(S):
 		x0,y0,x1,y1=S
@@ -143,25 +159,35 @@ class WindowFrame(list):
 	def duplicate(S):
 		return WindowFrame(S)
 
+	def grow(S,pixels):
+		SminX,SminY,SmaxX,SmaxY=S
+		S.set(SminX+pixels,SminY+pixels,SmaxX-pixels,SmaxY-pixels)
+		pass
+
+	def shrink(S,pixels):
+		S.grow(-pixels)
+
 	def subtract_panel(S,panel):
+		if not S.common(panel):
+			return
 		#DEBUGPRINT(f'S     {str(WindowFrame(S))}')
 		w,h=panel.width_heigth()
 		#DEBUGPRINT(f'panel {str(panel)} {w:4} {h:4}')
 
 		SminX,SminY,SmaxX,SmaxY=S
-		PminX,PminY,PmaxX,PmaxY=panel
+		T___X,T___Y,B___X,B___Y=panel
 		if w > h: # horizonal panel
-			if between(PminY,SminY,PmaxY):
-				S[miniY]=PmaxY
+			if between(T___Y,SminY,B___Y): # top panel
+				S.set(SminX,B___Y,SmaxX,SmaxY)
 				return
-			if between(PminY,SmaxY,PmaxY):
-				S[maxiY]=PminY
+			if between(T___Y,SmaxY,B___Y): # bottom panel
+				S.set(SminX,SminY,SmaxX,T___Y)
 				return
-		if between(PminX,SminX,PmaxX):
-			S[miniX]=PmaxX
+		if between(T___X,SminX,B___X): # left panel
+			S.set(B___X,SminY,SmaxX,SmaxY)
 			return
-		if between(PminX,SmaxX,PmaxX):
-			S[maxiX]=PminX
+		if between(T___X,SmaxX,B___X): # right panel
+			S.set(SminX,SminY,T___X,SmaxY)
 			return
 
 	def holds(S,x,y):
@@ -171,16 +197,30 @@ class WindowFrame(list):
 		return True
 
 	def divide_width(S):
-		xmid = (S[miniX]+S[maxiX])//2
-		S[maxiX]=xmid-B
-		return WindowFrame(xmid+B,S[miniY],S[maxiX],S[maxiY])
+		#DEBUGPRINT (f'divide_width')
+		#DEBUGPRINT (f'org   : {str(S)}')
+		ominx,ominy,omaxx,omaxy=S
+		xmidmin=(ominx+omaxx)//2-B
+		xmidmax=xmidmin+B+B
+		S.set(xmidmax,ominy,omaxx,omaxy)
+		ret = WindowFrame(ominx,ominy,xmidmin,omaxy)
+		#DEBUGPRINT (f'org/2 : {str(S)}')
+		#DEBUGPRINT (f'ret/2 : {str(ret)}')
+		return ret
 
 	def divide_heigth(S):
-		ymid = (S[miniY]+S[maxiY])//2
-		S[maxiY]=ymid-B
-		return WindowFrame(S[miniX],ymid+B,S[maxiX],S[maxiY])
+		#DEBUGPRINT (f'divide_heigth')
+		#DEBUGPRINT (f'org   : {str(S)}')
+		ominx,ominy,omaxx,omaxy=S
+		ymidmin=(ominy+omaxy)//2-B
+		ymidmax=ymidmin+B+B
+		S.set(ominx,ominy,omaxx,ymidmin)
+		ret = WindowFrame(ominx,ymidmax,omaxx,omaxy)
+		#DEBUGPRINT (f'org/2 : {str(S)}')
+		#DEBUGPRINT (f'ret/2 : {str(ret)}')
+		return ret
 
-	def sub_divide(S,parts):
+	def frame_divide(S,parts):
 		pieces=[]
 		def divide(frame,P):
 			P1=P//2
@@ -189,10 +229,12 @@ class WindowFrame(list):
 			if P<1 :
 				return
 			if P==1:
+				#DEBUGPRINT('Append')
 				pieces.append(frame)
 				return
 			w,h=frame.width_heigth()
-			if (w*4//5) > h:
+			# this is gold 89 55
+			if w*5 < h*6:
 				half=frame.divide_heigth()
 			else:
 				half=frame.divide_width()
@@ -200,6 +242,9 @@ class WindowFrame(list):
 			divide(half ,P2)
 		frame=S.duplicate()
 		divide(frame,parts)
+		if len(pieces) != parts:
+			raise RuntimeError (f'frame_divide({parts=}) made {len(pieces)} parts')
+		#DEBUGPRINT(f'frame_divide({parts=}) made {len(pieces)} parts')
 		return pieces
 
 	def size(S):
@@ -251,24 +296,104 @@ class WindowFrame(list):
 		# Calculate the area of the overlapping region
 		return overlap_width * overlap_height
 
-def best_match(old_frames,new_frames):
-	lo=len(old_frames) ; ln=len(new_frames)
+def group_by_common_aeria(herders,flok):
+	count=len(herders)
+	range_herders=range(0,count)
+	pen = [ [] for _ in range_herders]
+	#pen= [[]]*count
+	for sheep in flok:
+		best_herder=-1
+		best_pasture=-1
+		for herder,i in zip(herders,range_herders):
+			pasture=herder.common(sheep)
+			if pasture > best_pasture:
+				best_herder=i
+				best_pasture=pasture
+		pen[best_herder].append(sheep)
+		DEBUGPRINT(f'herder {best_herder} gets {sheep}')
+	return pen
+
+def make_match_in_hell(virgins,suitors):
+	marriages=[]
+	for bride, groom in zip(virgins,suitors):
+		couple=Lite(bride.get_id(),bride.get_desktop(),groom)
+		marriages.append(couple)
+	return marriages
+
+def make_match_in_heaven(virgins,suitors):
+
+	WOMAN=0 ; MAN=1 ; DOWRY=2
+	#DEBUGPRINT(f'{virgins=} , {suitors=}')
+	lo=len(virgins) ; ln=len(suitors)
+	DEBUGPRINT(f'{lo} virgins , {ln} suitors')
 	if lo!=ln:
-		raise ValueError ('best_match old_frames and new_frames should be of equal length.')
-	pairs=[]
-	for of in old_frames:
-		best=None
-		for nf in new_frames:
-			if not best:
-				best = [of,nf,of.commen(nf)]
+		raise ValueError ('best_match "virgins" and "suitors" must come in equal numbers.')
+
+	# calculate common ground
+	haeven=[[old.common(new) for old in virgins] for new in suitors ]
+	elysians_range=range(0,lo)
+	#DEBUG_SHOW_INT_ARRAY(haeven,'haeven')
+	countdown=lo*lo #+lo # number of array elements + one dim extra for elements that get 2 times crossed out.
+	marriages=[]
+	def wedding(eve,adam):
+		nonlocal countdown
+		# spoil it for the rest of the Elysians
+		for woman in elysians_range:
+			if haeven[woman][adam] < 0:
 				continue
-			comm=of.commen(nf)
-			if comm > best[2]:
-				best = [of,nf,comm]
-		pairs.append(best)
+			countdown-=1
+			haeven[woman][adam]=-1
+		for man in elysians_range:
+			if haeven[eve][man] < 0:
+				continue
+			countdown-=1
+			haeven[eve][man]=-1
+
+	while countdown > 0:
+		for eve in elysians_range:
+			# if haeven[eve][0]<0:
+			# 	continue
+			# find the best match for Eve (if she profits from the dowry that is.)
+			best_adam_for_eve=None
+			for adam in elysians_range:
+				if haeven[eve][adam]<0:
+					continue
+				if not best_adam_for_eve:
+					best_adam_for_eve=[eve,adam,haeven[eve][adam]]
+					continue
+				if haeven[eve][adam] > best_adam_for_eve[DOWRY]:
+					best_adam_for_eve=[eve,adam,haeven[eve][adam]]
+
+			# Is what is best for Eve also best for Adam?
+			best_bride=best_adam_for_eve
+			groom=best_adam_for_eve[MAN]
+			for eve in elysians_range:
+				# if haeven[eve][this_adam]<0:
+				# 	continue
+				if haeven[eve][groom] > best_bride[DOWRY]:
+					# bigger dowry change bride
+					best_bride=[eve,groom,haeven[eve][groom]]
+			bride=best_bride[WOMAN]
+			DEBUG_SHOW_INT_ARRAY(haeven, f'haeven{countdown:3}')
+			DEBUGPRINT(f'Wedding {bride=} {groom=}')
+			wedding(bride,groom)
+			# DEBUGPRINT(f'Before wedding({bride=:>3}X{groom=:<3}): {virgins=} , {suitors=}')
+			# DEBUGPRINT(f'{virgins[bride]=}')
+			# DEBUGPRINT(f'{suitors[groom]=}')
+			bride_lite=virgins[bride]
+			groom_frame=suitors[groom]
+			id=bride_lite.id
+			desk=bride_lite.desk
+			couple=Lite(id,desk,groom_frame)
+			marriages.append(couple)
+	DEBUG_SHOW_INT_ARRAY(haeven,f'left over heaven')		#DEBUG_SHOW_INT_ARRAY(haeven)
+	return marriages
 
 class Lite(WindowFrame):
-
+		# S.id='0x01800003'
+		# S.desk=int()
+		# frame=xwininfo(id)
+		# WindowFrame.__init__(S,frame)
 	def __init__(S,*args):
 		if isinstance(args[0],str):
 			l=args[0]
@@ -286,10 +411,19 @@ class Lite(WindowFrame):
 			h=int(l[n:n+4])
 			WindowFrame.__init__(S,lux,luy,w,h,xywh=True)
 			return
-		# S.id='0x01800003'
-		# S.desk=int()
-		# frame=xwininfo(id)
-		# WindowFrame.__init__(S,frame)
+		if isinstance(args[0],int):
+			S.id  = args[0]
+			S.desk= args[1]
+			if isinstance(args[2],WindowFrame):
+				minx,miny,maxx,maxy=args[2]
+				WindowFrame.__init__(S,minx,miny,maxx,maxy)
+				return
+		WindowFrame.__init__(S,args[3],args[4],args[5],args[6])
+
+	def __str__(S):
+		sid=f'{S.id:#08x}'[5:]
+		return f'Lite [{sid}]@[{S.desk:1}] {str(WindowFrame(S))}'
+		#return f'Lite [{S.id:#08x}]@[{S.desk:1}] {str(WindowFrame(S))}'
 
 	def __repr__(S):
 		# 0x03e0003e  1 3440 0    3440 1440
@@ -297,27 +431,32 @@ class Lite(WindowFrame):
 		w=c-a ; h = d-b
 		return f'Lite("{S.id:#08x} {S.desk:2} {a:4} {b:4} {w:4} {h:4}")'
 
-	def id(S):
+	def get_id(S):
 		return S.id
 
-	def desktop(S):
+	def get_desktop(S):
 		return S.desk
 
-	def frame(S):
+	def get_frame(S):
 		return WindowFrame.S
 
 	def place(S):
+		# wmctrl -i -r 0x0340003e -e '0,3500,100,500,700'
+		DEBUGPRINT(f'place {str(S)}')
 		x, y, w, h = S.x_y_width_heigth()
+		DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
 		wmctrl('-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
 
 class Monitor(WindowFrame):
+	count=-1
 	def __init__(S,name,x,y,w,h):
 		WindowFrame.__init__(S,x,y,w,h,xywh=True)
 		S.myname=name
+		S.count+=1
 
 	def __str__(S):
 		x0,y0,x1,y1=S
-		return f'{S.myname:10} [{x0:4},{y0:4}],[{x1:4},{y1:4}]'
+		return f'{S.myname:10} {S.count:2}[{x0:4},{y0:4}],[{x1:4},{y1:4}]'
 
 	def name(S):
 		return S.myname
@@ -344,16 +483,22 @@ def xrandr()->list:
 class Lunettes:
 	def __init__(S):
 		S.screens=xrandr()
-		#S.frames=[ X['Frame'] for X in screens.values()]
-		#DEBUGPRINT(S.screens)
-		S.lites=S.list_lites()
-		# S.show_lites()
-		S.show_screens()
-		panels=[panel for panel in S.lites if panel.desk < 0]
+		S.lites=S.list_lites() # list_lites skips the root desktop
+		#S.show_screens()
+		panels=[panel for panel in S.lites if panel.desk < 0] # displayed on all screen leave them alone
 		for screen in S.screens:
 			for panel in panels:
 				screen.subtract_panel(panel)
-		S.show_screens()
+		#DEBUGPRINT(str(S))
+
+	def __str__(S):
+		ret=f'Lunettes {len(S.screens)}'
+		for s in S.screens:
+			ret+=','+str(s)
+		return ret
+
+	def monitor(S,i):
+		return S.screens[i]
 
 	def show_screens(S):
 		for screen in S.screens:
@@ -443,7 +588,7 @@ class Lunettes:
 		# first field is the window number
 		active = S.active_desktop()
 		for fl in S.lites:
-			if fl.desktop() == active:
+			if fl.get_desktop() == active:
 				yield fl
 		#return [fl for fl in S.lites if fl.desktop() == active]
 
@@ -473,32 +618,52 @@ class Lunettes:
 
 	def divide_lites(S):
 		DEBUGPRINT(f'divide_lites {S=}')
+		front_lites=S.get_surface_lites()
+		lite_division=group_by_common_aeria(S.screens,front_lites)
+		for div in lite_division:
+			DEBUGPRINT(div)
 
-		# each lite to the monitor the with which it has the biggest common area
-		monitor_lites = [[] for _ in S.screens ]
-		for l in S.get_surface_lites():
-			best=None
-			count = -1
-			for s in S.screens:
-				count += 1
-				if not best:
-					best=[count, l, s.common(l)]
-					continue
-				com=s.common(l)
-				if com > best[2]:
-					best=[count, l, com]
-			monitor_lites[best[0]].append(best[1])
+		for screen,lites in zip(S.screens,lite_division):
+			DEBUGPRINT(f'{screen.name()}')
+			wanted_frames=len(lites)
+			if not wanted_frames:
+				continue
+			screen_tiles=screen.frame_divide(wanted_frames)
+			matched=make_match_in_heaven(lites,screen_tiles)
+			for match in matched:
+				match.shrink(B)
+				match.place()
+				DEBUGPRINT(f'{str(match )}')
 
-		for lites_of_monitor in monitor_lites:
-			DEBUGPRINT(lites_of_monitor)
 
-		# Devide each monitor in the number of WindowFrame's needed for its Lite's
-		i=-1
-		for screen in S.screens:
-			i+=1
-			onscreen_lites=len( monitor_lites[i])
-			frames=screen.sub_divide(onscreen_lites)
-			DEBUGPRINT(f'{frames=}')
+		# 	#matched=make_match_in_heaven(monitor_lites[i],monitor_frames[i])
+		# 	matched=make_match_in_hell(monitor_lites[i],monitor_frames[i])
+		# 	for lite in matched:
+		# 		lite.place()
+		# 		pass
+		# 	onscreen_lites_count=len( monitor_lites[i])
+		# 	monitor_frames[i]=S.monitor(i).frame_divide(onscreen_lites_count)
+		#
+		# for i in monitors_range:
+		# 	DEBUGPRINT(f'{i=:<3}{monitor_frames[i]=}')
+		# 	for lite in monitor_lites[i]:
+		# 		DEBUGPRINT(f'{lite=}')
+		#
+		# DEBUG_SHOW_INT_ARRAY(monitor_frames,'monitor frames')
+		#
+		# for i in monitors_range:
+		# 	#matched=make_match_in_heaven(monitor_lites[i],monitor_frames[i])
+		# 	matched=make_match_in_hell(monitor_lites[i],monitor_frames[i])
+		# 	for lite in matched:
+		# 		lite.place()
+		# 		pass
+
+		# for i in monitors_range:
+		# 	DEBUGPRINT(f'{i} {monitor_frames[i]}')
+		#
+		#
+		#
+		# 	best_match(lites_of_monitor[i],monitor_frames[i])
 		# 	lite_count=len(frame['lites'] )
 		# 	frame['divide']=S.divide_and_conquer(frame['frame'],lite_count)
 		# 	#DEBUGPRINT(f"{frame['divide']=}")
@@ -528,8 +693,13 @@ class Lunettes:
 #     # Use wmctrl to move and resize window
 #     cmd = ['wmctrl', '-i', '-r', window_id, '-e', f"0,{x},{y},{width},{height}"]
 #     subprocess.run(cmd)
+def divide_test(x0,y0,x1,y1,parts):
+	f=WindowFrame(x0,y0,x1,y1)
+	f.frame_divide(5)
+
 
 def main() -> None:
+	#divide_test(0,0,1024,2048,5)
 	lunnets=Lunettes()
 	lunnets.divide_lites()
 	#lunnets.show_lites()
