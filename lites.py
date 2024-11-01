@@ -1,11 +1,9 @@
 #!/usr/bin/python3
 import subprocess
 from collections import deque
-import json
 import re
-from services import *
 
-B=0  # border width
+B=4 # border width
 
 #Id_re     =r'Window id: *(0x\d+)'
 AulX_re     =r'Absolute upper-left X: *(\d+)'
@@ -13,8 +11,18 @@ AulY_re     =r'Absolute upper-left Y: *(\d+)'
 Width_re    =r'Width: *(\d+)'
 Height_re   =r'Height:*(\d+)'
 Xwin_re     ='|'.join([AulX_re,AulY_re,Width_re,Height_re])
-Re_Xwin=re.compile(Xwin_re,re.MULTILINE)
-Re_Number=re.compile(r'\D*(\d+)$')
+Re_Xwin     =re.compile(Xwin_re,re.MULTILINE)
+Re_Number   =re.compile(r'\D*(\d+)$')
+
+def service_call(*args):
+	try:
+		info = subprocess.check_output(args)
+	except subprocess.SubprocessError as e:
+		print(f'{args} failed')
+		print(f'subprocess.SubprocessError {e}')
+		return None
+	str_info=info.decode('utf-8')
+	return str_info.splitlines()
 
 # xdotool getwindowgeometry 121634861
 # Window 121634861
@@ -92,7 +100,7 @@ def xprop_borders(id):
 		frame_extents=re_extents.match(line)
 		if frame_extents:
 			ret=[int(frame_extents.group(i)) for i in range(1,5)]
-			DEBUGPRINT(f'{id:10}: {ret}')
+			#DEBUGPRINT(f'{id:10}: {ret}')
 			return ret
 	raise RuntimeError (f'xprop_borders({id}) no border info found.')
 
@@ -127,32 +135,6 @@ def xprop_show(id,prop=None):
 	if not prop:
 		print(f'end xprop_show({id}):')
 
-def get_real_frame_sizes():
-	DEBUGPRINT(f'get_real_frame_sizes NOT FUCTIONAL!!!')
-	ids=xwininfo_tree_ids()
-	for id in ids:
-		count=-1
-		for line in xprop_frame(id):
-			count+=1
-			region=re_region.match(line)
-			if region:
-				DEBUGPRINT(f'{id:>10} {count:4} ',end='')
-				DEBUGPRINT(line)
-			extents=re_extents.match(line)
-			if extents:
-				DEBUGPRINT(f'{id:>10} {count:4} ',end='')
-				DEBUGPRINT(line)
-
-
-# def wmctrl(*args) -> str:
-# 	call = ["wmctrl"] + list(args)
-# 	try:
-# 		res = subprocess.check_output(call)
-# 	except subprocess.SubprocessError as e:
-# 		print(f'wmctrl {args} failed')
-# 		print(f'subprocess.SubprocessError {e}')
-# 		return ''
-# 	return res.decode('utf-8')
 
 miniX=0 # X Upper Left
 miniY=1 # Y Upper Left
@@ -201,20 +183,11 @@ class WindowFrame(list):
 		return x0,y0,x1,y0,x1,y1,x1,y1
 
 	def difference(S,realsize):
-		DEBUGPRINT(f'difference {str(S)}')
-		DEBUGPRINT(f'           {str(realsize)}')
+		#DEBUGPRINT(f'difference {str(S)}')
+		#DEBUGPRINT(f'           {str(realsize)}')
 		ret = [Q-P for Q,P in zip(S,realsize)]
-		DEBUGPRINT(f'           {ret}')
+		#DEBUGPRINT(f'           {ret}')
 		return [Q-P for Q,P in zip(S,realsize)]
-
-	# def to_dict(S):
-	# 	# Convert instance to dictionary for JSON serialization
-	# 	return {'frame': S.frame}
-	#
-	# @classmethod
-	# def from_dict(cls, data):
-	# 	# Create instance from dictionary
-	# 	return cls(frame=data['frame'])
 
 	def duplicate(S):
 		return WindowFrame(S)
@@ -369,7 +342,7 @@ def group_by_common_aeria(herders,flok):
 				best_herder=i
 				best_pasture=pasture
 		pen[best_herder].append(sheep)
-		DEBUGPRINT(f'herder {best_herder} gets {sheep}')
+		#DEBUGPRINT(f'herder {best_herder} gets {sheep}')
 	return pen
 
 def make_match_in_hell(virgins,suitors):
@@ -380,72 +353,35 @@ def make_match_in_hell(virgins,suitors):
 	return marriages
 
 def make_match_in_heaven(virgins,suitors):
-
-	WOMAN=0 ; MAN=1 ; DOWRY=2
-	#DEBUGPRINT(f'{virgins=} , {suitors=}')
+	VIRGIN=0 ; SUITOR=1 ; DOWRY = 2
 	lo=len(virgins) ; ln=len(suitors)
-	DEBUGPRINT(f'{lo} virgins , {ln} suitors')
 	if lo!=ln:
 		raise ValueError ('best_match "virgins" and "suitors" must come in equal numbers.')
-
-	# calculate common ground
-	haeven=[[old.common(new) for old in virgins] for new in suitors ]
-	elysians_range=range(0,lo)
-	#DEBUG_SHOW_INT_ARRAY(haeven,'haeven')
-	countdown=lo*lo #+lo # number of array elements + one dim extra for elements that get 2 times crossed out.
-	marriages=[]
-	def wedding(eve,adam):
-		nonlocal countdown
-		# spoil it for the rest of the Elysians
-		for woman in elysians_range:
-			if haeven[woman][adam] < 0:
+	genesis=[]
+	for virgin in virgins:
+		for suitor in suitors:
+			dowry=virgin.common(suitor)
+			genesis.append((virgin,suitor,dowry))
+	genesis.sort(key=lambda tup: -tup[DOWRY])
+	#DEBUGPRINT(f'{genesis=}')
+	heaven=deque(genesis)
+	paradise=deque()
+	#DEBUGPRINT(f'{heaven=}')
+	while True:
+		pair=heaven.pop()
+		paradise.append(Lite(pair[VIRGIN].get_id(),pair[VIRGIN].get_desktop(),pair[SUITOR]))
+		if not heaven:
+			return paradise
+		new_heaven=deque()
+		bride=pair[VIRGIN]
+		groom=pair[SUITOR]
+		for single_pair in heaven:
+			if bride == single_pair[VIRGIN]:
 				continue
-			countdown-=1
-			haeven[woman][adam]=-1
-		for man in elysians_range:
-			if haeven[eve][man] < 0:
+			if groom == single_pair[SUITOR]:
 				continue
-			countdown-=1
-			haeven[eve][man]=-1
-
-	while countdown > 0:
-		for eve in elysians_range:
-			# if haeven[eve][0]<0:
-			# 	continue
-			# find the best match for Eve (if she profits from the dowry that is.)
-			best_adam_for_eve=None
-			for adam in elysians_range:
-				if not best_adam_for_eve:
-					best_adam_for_eve=[eve,adam,haeven[eve][adam]]
-				if haeven[eve][adam]<0:
-					continue
-				if haeven[eve][adam] > best_adam_for_eve[DOWRY]:
-					best_adam_for_eve=[eve,adam,haeven[eve][adam]]
-
-			# Is what is best for Eve also best for Adam?
-			best_bride=best_adam_for_eve
-			groom=best_adam_for_eve[MAN]
-			for eve in elysians_range:
-				# if haeven[eve][this_adam]<0:
-				# 	continue
-				if haeven[eve][groom] > best_bride[DOWRY]:
-					# bigger dowry change bride
-					best_bride=[eve,groom,haeven[eve][groom]]
-			bride=best_bride[WOMAN]
-			DEBUG_SHOW_INT_ARRAY(haeven, f'haeven{countdown:3}')
-			DEBUGPRINT(f'Wedding {bride=} {groom=}')
-			wedding(bride,groom)
-			# DEBUGPRINT(f'Before wedding({bride=:>3}X{groom=:<3}): {virgins=} , {suitors=}')
-			# DEBUGPRINT(f'{virgins[bride]=}')
-			# DEBUGPRINT(f'{suitors[groom]=}')
-			bride_lite=virgins[bride]
-			groom_frame=suitors[groom]
-			id=bride_lite.id
-			desk=bride_lite.desk
-			couple=Lite(id,desk,groom_frame)
-			marriages.append(couple)
-	DEBUG_SHOW_INT_ARRAY(haeven,f'left over heaven')		#DEBUG_SHOW_INT_ARRAY(haeven)
-	return marriages
+			new_heaven.append(single_pair)
+		heaven=new_heaven
 
 class Lite(WindowFrame):
 		# S.id='0x01800003'
@@ -475,7 +411,7 @@ class Lite(WindowFrame):
 		else:
 			ux,uy,lx,ly=args[3],args[4],args[5],args[6]
 		borders=xprop_borders(S.id)
-		DEBUGPRINT(f'Borders {borders}')
+		#DEBUGPRINT(f'Borders {borders}')
 		WindowFrame.__init__(S,ux,uy,lx,ly)
 
 	def __str__(S):
@@ -507,17 +443,14 @@ class Lite(WindowFrame):
 
 	def place(S):
 		# wmctrl -i -r 0x0340003e -e '0,3500,100,500,700'
-		DEBUGPRINT(f'place {str(S)}')
+		east,west,north,south=xprop_borders(S.id)
 		x, y, w, h = S.x_y_width_heigth()
-		DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
+		x+=east
+		y+=north
+		w-=(east+west)
+		h-=(north+south)
+		#DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
 		service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
-
-		xwin=xwininfo_frame(S.id)
-
-		DEBUGPRINT(f'xwininfo Difference {S.difference(xwin)}')
-		DEBUGPRINT(f'xwininfo {xwin}')
-		xdo=xdotool_frame(S.id)
-		DEBUGPRINT(f'xdotool {xdo}')
 
 class Monitor(WindowFrame):
 	count=-1
@@ -540,7 +473,7 @@ def xrandr_monitors()->list:
 		match = monitor_regex.search(line)
 		if match:
 			monitor, width, height, x_offset, y_offset = match.groups()
-			DEBUGPRINT(f'{monitor=},{ width=},{ height=},{ x_offset=},{ y_offset=}')
+			#DEBUGPRINT(f'{monitor=},{ width=},{ height=},{ x_offset=},{ y_offset=}')
 			screens.append(Monitor(monitor,int(x_offset),int(y_offset),int(width),int(height)))
 	return screens
 
@@ -656,22 +589,15 @@ class Lunettes:
 				yield fl
 		#return [fl for fl in S.lites if fl.desktop() == active]
 
-	def _make_json_friendly_match_frames_dict(S):
-		i=0
-		S.match_frames={}
-		for frame in S.frames:
-			S.match_frames[i]={'frame':frame,'lites':[]}
-			i+=1
-
 	def divide_lites(S):
-		DEBUGPRINT(f'divide_lites {S=}')
+		#DEBUGPRINT(f'divide_lites {S=}')
 		front_lites=S.get_surface_lites()
 		lite_division=group_by_common_aeria(S.screens,front_lites)
-		for div in lite_division:
-			DEBUGPRINT(div)
+		# for div in lite_division:
+		# 	#DEBUGPRINT(div)
 
 		for screen,lites in zip(S.screens,lite_division):
-			DEBUGPRINT(f'{screen.name()}')
+			#DEBUGPRINT(f'{screen.name()}')
 			wanted_frames=len(lites)
 			if not wanted_frames:
 				continue
@@ -680,37 +606,12 @@ class Lunettes:
 			for match in matched:
 				match.shrink(B)
 				match.place()
-				DEBUGPRINT(f'{str(match )}')
+				#DEBUGPRINT(f'{str(match )}')
 
 def divide_test(x0,y0,x1,y1,parts):
 	f=WindowFrame(x0,y0,x1,y1)
 	f.frame_divide(5)
 
-def main() -> None:
-	#divide_test(0,0,1024,2048,5)
+if __name__ == '__main__':
 	lunnets=Lunettes()
 	lunnets.divide_lites()
-	#lunnets.show_lites()
-
-if __name__ == '__main__':
-	# for id in xprop_tree_xwins():
-	# 	xprop_show(id)
-	# for id in xprop_tree_xwins():
-	# 	xprop_show(id,'_NET_WM_STATE')
-	# 	xprop_show(id,'_NET_WM_DESKTOP')
-	# DEBUGEXIT(0)
-	main()
-	DEBUGEXIT(0)
-	ids=xwininfo_tree_ids()
-
-	for id in ids:
-		xprop_frame=decorated_frame_size(id,)
-		xdo_frame  =xdotool_frame(id)
-		xwin_frame =xwininfo_frame(id)
-		if xprop_frame:
-			print(f'{xprop_frame=}')
-		print(f'{xdo_frame=}')
-		print(f'{xwin_frame=}')
-	#get_real_frame_sizes()
-	#main()
-
