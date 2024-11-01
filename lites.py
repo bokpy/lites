@@ -3,7 +3,7 @@ import subprocess
 from collections import deque
 import re
 
-B=4 # border width
+#B=4 # border width
 
 #Id_re     =r'Window id: *(0x\d+)'
 AulX_re     =r'Absolute upper-left X: *(\d+)'
@@ -232,8 +232,9 @@ class WindowFrame(list):
 		#DEBUGPRINT (f'divide_width')
 		#DEBUGPRINT (f'org   : {str(S)}')
 		ominx,ominy,omaxx,omaxy=S
-		xmidmin=(ominx+omaxx)//2-B
-		xmidmax=xmidmin+B+B
+		x_sum=ominx+omaxx
+		xmidmin=x_sum//2
+		xmidmax=x_sum-xmidmin
 		S.set(xmidmax,ominy,omaxx,omaxy)
 		ret = WindowFrame(ominx,ominy,xmidmin,omaxy)
 		#DEBUGPRINT (f'org/2 : {str(S)}')
@@ -244,8 +245,9 @@ class WindowFrame(list):
 		#DEBUGPRINT (f'divide_heigth')
 		#DEBUGPRINT (f'org   : {str(S)}')
 		ominx,ominy,omaxx,omaxy=S
-		ymidmin=(ominy+omaxy)//2-B
-		ymidmax=ymidmin+B+B
+		y_sum=ominy+omaxy
+		ymidmin=y_sum//2
+		ymidmax=y_sum-ymidmin
 		S.set(ominx,ominy,omaxx,ymidmin)
 		ret = WindowFrame(ominx,ymidmax,omaxx,omaxy)
 		#DEBUGPRINT (f'org/2 : {str(S)}')
@@ -604,7 +606,6 @@ class Lunettes:
 			screen_tiles=screen.frame_divide(wanted_frames)
 			matched=make_match_in_heaven(lites,screen_tiles)
 			for match in matched:
-				match.shrink(B)
 				match.place()
 				#DEBUGPRINT(f'{str(match )}')
 
