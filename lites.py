@@ -1,41 +1,11 @@
 #!/usr/bin/python3
 import subprocess
+from collections import deque
 import json
 import re
+from services import *
 
-DEBUGEXIT=exit
-DEBUGPRINT=print
-
-B=120   # border width
-
-def DEBUG_SHOW_INT_ARRAY(a,title=''):
-	print(title)
-	for r in a:
-		for i in r:
-			if isinstance(i,int):
-				if abs(i) > 1000:
-					print(f'{i//1000:5}k',end='')
-					continue
-				print(f'{i:6}',end='')
-				continue
-			print(f'{i}',end='')
-		print()
-
-def SHOWFRAME(x, y=0, width=0, height=0,pend='\n'):
-	if not isinstance(x,int):
-		x,y, width, height = x
-	print (f'X({x:4}) Y({y:4}) W({width:4}) H({height:4})',end=pend)
-
-def JDUMP(dct,title=''):
-	jd=json.dumps(dct,indent=4)
-	if(title): print(title)
-	print(f'{jd}')
-
-def try_int(val):
-	try:
-		return int(val)
-	except ValueError:
-		return val.strip()
+B=0  # border width
 
 #Id_re     =r'Window id: *(0x\d+)'
 AulX_re     =r'Absolute upper-left X: *(\d+)'
@@ -44,62 +14,145 @@ Width_re    =r'Width: *(\d+)'
 Height_re   =r'Height:*(\d+)'
 Xwin_re     ='|'.join([AulX_re,AulY_re,Width_re,Height_re])
 Re_Xwin=re.compile(Xwin_re,re.MULTILINE)
+Re_Number=re.compile(r'\D*(\d+)$')
 
-def xwininfo(id)->"WindowFrame":
+# xdotool getwindowgeometry 121634861
+# Window 121634861
+# Position: 4436,341 (screen: 0)
+# Geometry: 601x282
+
+Re_Position=re.compile(r'\s*Position:\D*(\d+),(\d+).*')
+Re_Geometry=re.compile(r'\s*Geometry:\D*(\d+)x(\d+).*')
+
+def xdotool_frame(id):
+	lines=service_call("xdotool","getwindowgeometry",str(id))
+	# for i,line in zip(range(0,10),lines):
+	# 	DEBUGPRINT(f'{i:2} "{line}"')
+	position=Re_Position.match(lines[1])
+	geometry=Re_Geometry.match(lines[2])
+	xu=int(position.group(1))
+	yu=int(position.group(2))
+	w =int(geometry.group(1))
+	h =int(geometry.group(2))
+	return WindowFrame(xu,yu,w,h,True)
+
+def xwininfo_frame(id)->"WindowFrame":
+	def extract_number(string):
+		#DEBUGPRINT(f'extract_number("{string }") ')
+		num=Re_Number.match(string)
+		# if not num:
+		# 	print(f'"{string }" with no number.')
+		# 	DEBUGEXIT(0)
+		return int(num.group(1))
+
 	#DEBUGPRINT(f'<--- xwininfo({id}) --->')
-	try:
-		info = subprocess.check_output(["xwininfo","-frame","-id",str(id)])
-	except subprocess.SubprocessError as e:
-		print(f'xwininfo -id {id} failed')
-		print(f'subprocess.SubprocessError {e}')
-		return None
-	str_info=info.decode('utf-8')
-	grps=Re_Xwin.findall(str_info)
-	DEBUGPRINT(grps)
-	return grps
+	lines=service_call("xwininfo", "-id", str(id))
+	# for i in range(0,8):
+	# 	DEBUGPRINT(f'{i:2} "{lines[i]}"')
+	xu=extract_number(lines[3])
+	yu=extract_number(lines[4])
+	w =extract_number(lines[7])
+	h =extract_number(lines[8])
+	#DEBUGPRINT(f'{xu=} {yu=} {w =} {h =}')
+	# DEBUGPRINT(grps)
+	return WindowFrame(xu,yu,w,h,True)
 
-# def xwininfo_frame(id):
+def xwininfo_tree_ids():
+	ids=deque()
+	re_id=re.compile(r'([0-9]{5,})')
+	lines=service_call("xwininfo","-int","-root","-tree")
+	for line in lines:
+		if '(has no name):' in line :
+			continue
+		id_list=re_id.findall(line)
+		if not id_list:
+			continue
+		ids.append(int(id_list[0]))
+	return ids
+
+#re_region=re.compile(r'^_NET_WM_OPAQUE_REGION\(CARDINAL\) =\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+).*')
+re_region  = re.compile(r'^_NET_WM_OPAQUE_REGION\D*(\d+)\D*(\d+)\D*(\d+)\D*(\d+).*')
+
+re_frame=re.compile(r'^(_NET_FRAME_EXTENTS|WM_CLASS)')
+def xprop_tree_xwins():
+	ids=deque()
+	re_id=re.compile(r'([0-9]{5,})')
+	for line in service_call("xwininfo","-int","-root","-tree"):
+		if '(has no name):' in line :
+			continue
+		id_list=re_id.findall(line)
+		if not id_list:
+			continue
+		ids.append(int(id_list[0]))
+	return ids
+
+re_extents = re.compile(r'^_NET_FRAME_EXTENTS\D*(\d+)\D*(\d+)\D*(\d+)\D*(\d+).*')
+def xprop_borders(id):
+	for line in service_call("xprop","-len","128","-id",str(id)):
+		frame_extents=re_extents.match(line)
+		if frame_extents:
+			ret=[int(frame_extents.group(i)) for i in range(1,5)]
+			DEBUGPRINT(f'{id:10}: {ret}')
+			return ret
+	raise RuntimeError (f'xprop_borders({id}) no border info found.')
+
+def xprop_in_view(id):
+	"""
+	test the visibility of a X11 window
+	:param id: id of the window
+	:return: the number of the desktop that displays the window when visible else -1
+	"""
+	desk=-1
+	for line in service_call("xprop","-len","128","-id",str(id)):
+		if '_NET_WM_STATE_HIDDEN' in line:
+			return -1
+		if '_NET_WM_DESKTOP'  in line:
+			equal=line.rfind('=')
+			desk=int(line[equal+1:])
+			if (desk < 0) or (desk>32):
+				return -1
+	return desk
+
+def xprop_show(id,prop=None):
+	if not prop:
+		print(f'xprop_show({id}):')
+	i=-1
+	for line in service_call("xprop","-len","128","-id",str(id)):
+		i+=1
+		if not prop:
+			print(f'{i:4}:"{line}"')
+			continue
+		if prop in line:
+			print(f'{id:10} {i:4}:"{line}"')
+	if not prop:
+		print(f'end xprop_show({id}):')
+
+def get_real_frame_sizes():
+	DEBUGPRINT(f'get_real_frame_sizes NOT FUCTIONAL!!!')
+	ids=xwininfo_tree_ids()
+	for id in ids:
+		count=-1
+		for line in xprop_frame(id):
+			count+=1
+			region=re_region.match(line)
+			if region:
+				DEBUGPRINT(f'{id:>10} {count:4} ',end='')
+				DEBUGPRINT(line)
+			extents=re_extents.match(line)
+			if extents:
+				DEBUGPRINT(f'{id:>10} {count:4} ',end='')
+				DEBUGPRINT(line)
+
+
+# def wmctrl(*args) -> str:
+# 	call = ["wmctrl"] + list(args)
 # 	try:
-# 		info = subprocess.check_output(["xwininfo", "-frame", "-id",str(id)])
+# 		res = subprocess.check_output(call)
 # 	except subprocess.SubprocessError as e:
-# 		print(f'xwininfo -id {id} failed')
+# 		print(f'wmctrl {args} failed')
 # 		print(f'subprocess.SubprocessError {e}')
-# 		return {}
-# 	str_info=info.decode('utf-8')
-#
-# 	return str_info
-
-# def get_window_size_with_decorations(window_id):
-# 	# Run xwininfo for the given window ID
-# 	result = subprocess.run(['xwininfo', '-id',
-# 	                         str(window_id)], stdout=subprocess.PIPE)
-# 	output = result.stdout.decode('utf-8')
-#
-# 	# Parse the output for width and height
-# 	width, height = None, None
-# 	for line in output.splitlines():
-# 		if 'Width:' in line:
-# 			width = int(line.split(':')[1].strip())
-# 		elif 'Height:' in line:
-# 			height = int(line.split(':')[1].strip())
-#
-# 	return width, height
-
-	# # Example usage:
-	# # Replace '0x123456' with the actual window ID of the target window.
-	# window_id = '0x123456'
-	# width, height = get_window_size_with_decorations(window_id)
-	# print(f'Width: {width}, Height: {height}')
-
-def wmctrl(*args) -> str:
-	call = ["wmctrl"] + list(args)
-	try:
-		res = subprocess.check_output(call)
-	except subprocess.SubprocessError as e:
-		print(f'wmctrl {args} failed')
-		print(f'subprocess.SubprocessError {e}')
-		return ''
-	return res.decode('utf-8')
+# 		return ''
+# 	return res.decode('utf-8')
 
 miniX=0 # X Upper Left
 miniY=1 # Y Upper Left
@@ -147,6 +200,13 @@ class WindowFrame(list):
 		x0,y0,x1,y1=S
 		return x0,y0,x1,y0,x1,y1,x1,y1
 
+	def difference(S,realsize):
+		DEBUGPRINT(f'difference {str(S)}')
+		DEBUGPRINT(f'           {str(realsize)}')
+		ret = [Q-P for Q,P in zip(S,realsize)]
+		DEBUGPRINT(f'           {ret}')
+		return [Q-P for Q,P in zip(S,realsize)]
+
 	# def to_dict(S):
 	# 	# Convert instance to dictionary for JSON serialization
 	# 	return {'frame': S.frame}
@@ -159,13 +219,12 @@ class WindowFrame(list):
 	def duplicate(S):
 		return WindowFrame(S)
 
-	def grow(S,pixels):
+	def shrink(S,pixels):
 		SminX,SminY,SmaxX,SmaxY=S
 		S.set(SminX+pixels,SminY+pixels,SmaxX-pixels,SmaxY-pixels)
-		pass
 
-	def shrink(S,pixels):
-		S.grow(-pixels)
+	def grow(S,pixels):
+		S.shrink(-pixels)
 
 	def subtract_panel(S,panel):
 		if not S.common(panel):
@@ -356,10 +415,9 @@ def make_match_in_heaven(virgins,suitors):
 			# find the best match for Eve (if she profits from the dowry that is.)
 			best_adam_for_eve=None
 			for adam in elysians_range:
-				if haeven[eve][adam]<0:
-					continue
 				if not best_adam_for_eve:
 					best_adam_for_eve=[eve,adam,haeven[eve][adam]]
+				if haeven[eve][adam]<0:
 					continue
 				if haeven[eve][adam] > best_adam_for_eve[DOWRY]:
 					best_adam_for_eve=[eve,adam,haeven[eve][adam]]
@@ -402,23 +460,23 @@ class Lite(WindowFrame):
 			S.id  =int(l[:10],16)
 			S.desk=int(l[11:13])
 			n=14
-			lux=int(l[n:n+4])
+			ux=int(l[n:n+4])
 			n+=5
-			luy=int(l[n:n+4])
+			uy=int(l[n:n+4])
 			n+=5
-			w=int(l[n:n+4])
+			lx=ux+int(l[n:n+4])
 			n+=5
-			h=int(l[n:n+4])
-			WindowFrame.__init__(S,lux,luy,w,h,xywh=True)
-			return
-		if isinstance(args[0],int):
+			ly=uy+int(l[n:n+4])
+		elif isinstance(args[0],int):
 			S.id  = args[0]
 			S.desk= args[1]
 			if isinstance(args[2],WindowFrame):
-				minx,miny,maxx,maxy=args[2]
-				WindowFrame.__init__(S,minx,miny,maxx,maxy)
-				return
-		WindowFrame.__init__(S,args[3],args[4],args[5],args[6])
+				ux,uy,lx,ly=args[2]
+		else:
+			ux,uy,lx,ly=args[3],args[4],args[5],args[6]
+		borders=xprop_borders(S.id)
+		DEBUGPRINT(f'Borders {borders}')
+		WindowFrame.__init__(S,ux,uy,lx,ly)
 
 	def __str__(S):
 		sid=f'{S.id:#08x}'[5:]
@@ -440,12 +498,26 @@ class Lite(WindowFrame):
 	def get_frame(S):
 		return WindowFrame.S
 
+	def is_lit_on(S,desktop):
+		if desktop != S.desk:
+			return False
+		if xprop_in_view(S.id)<0:
+			return False
+		return True
+
 	def place(S):
 		# wmctrl -i -r 0x0340003e -e '0,3500,100,500,700'
 		DEBUGPRINT(f'place {str(S)}')
 		x, y, w, h = S.x_y_width_heigth()
 		DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
-		wmctrl('-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
+		service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
+
+		xwin=xwininfo_frame(S.id)
+
+		DEBUGPRINT(f'xwininfo Difference {S.difference(xwin)}')
+		DEBUGPRINT(f'xwininfo {xwin}')
+		xdo=xdotool_frame(S.id)
+		DEBUGPRINT(f'xdotool {xdo}')
 
 class Monitor(WindowFrame):
 	count=-1
@@ -461,18 +533,10 @@ class Monitor(WindowFrame):
 	def name(S):
 		return S.myname
 
-def xrandr()->list:
+def xrandr_monitors()->list:
 	monitor_regex = re.compile(r'(\S+) connected.*? (\d+)x(\d+)\+(\d+)\+(\d+)')
-	try:
-		bytes = subprocess.check_output(["xrandr"])
-	except subprocess.SubprocessError as e:
-		print(f'xrandr failed')
-		print(f'subprocess.SubprocessError {e}')
-		return {}
-	lines=bytes.decode('utf-8').splitlines()
-	DEBUGPRINT(f'{lines}')
 	screens=[]
-	for line in lines:
+	for line in service_call("xrandr"):
 		match = monitor_regex.search(line)
 		if match:
 			monitor, width, height, x_offset, y_offset = match.groups()
@@ -482,7 +546,7 @@ def xrandr()->list:
 
 class Lunettes:
 	def __init__(S):
-		S.screens=xrandr()
+		S.screens=xrandr_monitors()
 		S.lites=S.list_lites() # list_lites skips the root desktop
 		#S.show_screens()
 		panels=[panel for panel in S.lites if panel.desk < 0] # displayed on all screen leave them alone
@@ -553,10 +617,15 @@ class Lunettes:
 		return ret
 	
 	def list_lites(S):
+		"""
+		Create a the list of Lites on all screen(s).
+		Except the "Desktop"
+		:return: list of Lites
+		"""
 		#DEBUGPRINT('list_windows')
 		# 0x01a0009c -1 0    0    6880 1440 Morfine Desktop
-		l = wmctrl('-l', '-G')
-		return [Lite(lt) for lt in l.splitlines() if not ((' -1 ' in lt ) and ('Desktop' in lt))]
+		lines = service_call('wmctrl','-l', '-G')
+		return [Lite(lt) for lt in lines if not ((' -1 ' in lt ) and ('Desktop' in lt))]
 
 	def show_lites(S):
 		for lite in S.lites:
@@ -571,24 +640,19 @@ class Lunettes:
 		the line with the asterix
 		:return: the line with tha asterix split into a list at the whitespaces.
 		"""
-		l = wmctrl('-d')
-		# print(l)
-		a = S._array(l)
-		# print(f'{a=}')
-		for line in a:
-			# print(f'{line=}')
-			if line[1] == '*':
+		for line in service_call('wmctrl','-d'):
+			if line[3:4] == '*':
 				# eg ['1', '*', 'DG:', '6880x1440', 'VP:', '0,0', 'WA:', '0,0', '6880x1440', 'inet']
-				return int(line[0])
+				return int(line[:2])
 		raise RuntimeError (f"Lunettes did not find an active window")
 		return -1
 	
 	def get_surface_lites(S):
 		# ['1', '*', 'DG:', '6880x1440', 'VP:', '0,0', 'WA:', '0,0', '6880x1440', 'inet']
 		# first field is the window number
-		active = S.active_desktop()
+		active_desktop = S.active_desktop()
 		for fl in S.lites:
-			if fl.get_desktop() == active:
+			if fl.is_lit_on(active_desktop):
 				yield fl
 		#return [fl for fl in S.lites if fl.desktop() == active]
 
@@ -598,23 +662,6 @@ class Lunettes:
 		for frame in S.frames:
 			S.match_frames[i]={'frame':frame,'lites':[]}
 			i+=1
-
-	# def _lites2match_frames(S):
-	# 	S._make_json_friendly_match_frames_dict()
-	# 	#JDUMP(S.match_frames)
-	# 	for L in S.on_show: # lite eg 0x03600007 1 3464 116 1612 1304 0.0 0
-	# 		best_match=None
-	# 		frame_count=-1
-	# 		for F in S.frames:
-	# 			frame_count+=1
-	# 			cf=S.common_surface(F[0],F[1],F[2],F[3] , L[2],L[3],L[4],L[5])
-	# 			if not best_match:
-	# 				best_match=(cf,frame_count)
-	# 				continue
-	# 			if cf > best_match[0]:
-	# 				best_match=(cf,frame_count)
-	# 		#DEBUGPRINT(f'{best_match[0]=},{best_match[1]=}')
-	# 		S.match_frames[best_match[1]]['lites'].append(L)
 
 	def divide_lites(S):
 		DEBUGPRINT(f'divide_lites {S=}')
@@ -635,68 +682,9 @@ class Lunettes:
 				match.place()
 				DEBUGPRINT(f'{str(match )}')
 
-
-		# 	#matched=make_match_in_heaven(monitor_lites[i],monitor_frames[i])
-		# 	matched=make_match_in_hell(monitor_lites[i],monitor_frames[i])
-		# 	for lite in matched:
-		# 		lite.place()
-		# 		pass
-		# 	onscreen_lites_count=len( monitor_lites[i])
-		# 	monitor_frames[i]=S.monitor(i).frame_divide(onscreen_lites_count)
-		#
-		# for i in monitors_range:
-		# 	DEBUGPRINT(f'{i=:<3}{monitor_frames[i]=}')
-		# 	for lite in monitor_lites[i]:
-		# 		DEBUGPRINT(f'{lite=}')
-		#
-		# DEBUG_SHOW_INT_ARRAY(monitor_frames,'monitor frames')
-		#
-		# for i in monitors_range:
-		# 	#matched=make_match_in_heaven(monitor_lites[i],monitor_frames[i])
-		# 	matched=make_match_in_hell(monitor_lites[i],monitor_frames[i])
-		# 	for lite in matched:
-		# 		lite.place()
-		# 		pass
-
-		# for i in monitors_range:
-		# 	DEBUGPRINT(f'{i} {monitor_frames[i]}')
-		#
-		#
-		#
-		# 	best_match(lites_of_monitor[i],monitor_frames[i])
-		# 	lite_count=len(frame['lites'] )
-		# 	frame['divide']=S.divide_and_conquer(frame['frame'],lite_count)
-		# 	#DEBUGPRINT(f"{frame['divide']=}")
-		#
-		# for frame in S.match_frames.values():
-		# 	for i in range(0,len(frame['lites'])):
-		# 		#DEBUGPRINT (f"{frame['lites'][i]} ")
-		# 		#DEBUGPRINT (f"{frame['divide'][i]}")
-		# 		lite_id    = frame['lites'][i][0]
-		# 		lite_frame = frame['divide'][i]
-		# 		S.position_and_size(lite_id,lite_frame)
-		# 		corrected_farme=S.correction(lite_id,lite_frame)
-		# 		if corrected_farme:
-		# 			S.position_and_size(lite_id,corrected_farme)
-
-# winid=active[]
-
-# Function to list all windows
-# def list_windows():
-#     result = subprocess.run(['wmctrl', '-l'], stdout=subprocess.PIPE)
-#     windows = result.stdout.decode('utf-8').strip().split("\n")
-#     for window in windows:
-#         print(window)
-#
-# # Function to move and resize a window using its window ID (handle)
-# def move_and_resize_window(window_id, x, y, width, height):
-#     # Use wmctrl to move and resize window
-#     cmd = ['wmctrl', '-i', '-r', window_id, '-e', f"0,{x},{y},{width},{height}"]
-#     subprocess.run(cmd)
 def divide_test(x0,y0,x1,y1,parts):
 	f=WindowFrame(x0,y0,x1,y1)
 	f.frame_divide(5)
-
 
 def main() -> None:
 	#divide_test(0,0,1024,2048,5)
@@ -705,5 +693,24 @@ def main() -> None:
 	#lunnets.show_lites()
 
 if __name__ == '__main__':
+	# for id in xprop_tree_xwins():
+	# 	xprop_show(id)
+	# for id in xprop_tree_xwins():
+	# 	xprop_show(id,'_NET_WM_STATE')
+	# 	xprop_show(id,'_NET_WM_DESKTOP')
+	# DEBUGEXIT(0)
 	main()
+	DEBUGEXIT(0)
+	ids=xwininfo_tree_ids()
+
+	for id in ids:
+		xprop_frame=decorated_frame_size(id,)
+		xdo_frame  =xdotool_frame(id)
+		xwin_frame =xwininfo_frame(id)
+		if xprop_frame:
+			print(f'{xprop_frame=}')
+		print(f'{xdo_frame=}')
+		print(f'{xwin_frame=}')
+	#get_real_frame_sizes()
+	#main()
 
