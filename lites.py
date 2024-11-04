@@ -3,6 +3,8 @@ import subprocess
 from collections import deque
 import re
 
+from services import DEBUGPRINT
+
 #B=4 # border width
 
 #Id_re     =r'Window id: *(0x\d+)'
@@ -94,15 +96,19 @@ def xprop_tree_xwins():
 		ids.append(int(id_list[0]))
 	return ids
 
-re_extents = re.compile(r'^_NET_FRAME_EXTENTS\D*(\d+)\D*(\d+)\D*(\d+)\D*(\d+).*')
+re_extents = re.compile(r'.*FRAME_EXTENTS\(CARDINAL\) =\D*(\d+)\D*(\d+)\D*(\d+)\D*(\d+).*')
 def xprop_borders(id):
+	borders=[0,0,0,0]
 	for line in service_call("xprop","-len","128","-id",str(id)):
 		frame_extents=re_extents.match(line)
 		if frame_extents:
-			ret=[int(frame_extents.group(i)) for i in range(1,5)]
-			#DEBUGPRINT(f'{id:10}: {ret}')
-			return ret
-	raise RuntimeError (f'xprop_borders({id}) no border info found.')
+			#DEBUGPRINT(f'{line}\n{frame_extents.groups()}')
+			brims=[int(value) for value in frame_extents.groups()]
+			for brim,border in zip(brims,borders):
+				if brim > border:
+					borders=brims
+	#DEBUGPRINT(f'return {borders}\n')
+	return borders
 
 def xprop_in_view(id):
 	"""
@@ -114,7 +120,7 @@ def xprop_in_view(id):
 	for line in service_call("xprop","-len","128","-id",str(id)):
 		if '_NET_WM_STATE_HIDDEN' in line:
 			return -1
-		if '_NET_WM_DESKTOP'  in line:
+		if '_NET_WM_DESKTOP(CARDINAL)'  in line:
 			equal=line.rfind('=')
 			desk=int(line[equal+1:])
 			if (desk < 0) or (desk>32):
@@ -135,17 +141,18 @@ def xprop_show(id,prop=None):
 	if not prop:
 		print(f'end xprop_show({id}):')
 
-
 miniX=0 # X Upper Left
 miniY=1 # Y Upper Left
 maxiX=2 # X Lower Rigth
 maxiY=3 # Y Lower Rigth
 
-
 def square_distance(ax,ay,bx,by):
 	dx=ax-bx
 	dy=ay-by
 	return dx*dx+dy*dy
+
+def manhattan_distance(ax,ay,bx,by):
+	return abs(ax-bx)+abs(ay-by)
 
 def between(lo,mid,hi):
 	return (lo<=mid) and (hi>=mid)
@@ -182,12 +189,12 @@ class WindowFrame(list):
 		x0,y0,x1,y1=S
 		return x0,y0,x1,y0,x1,y1,x1,y1
 
-	def difference(S,realsize):
-		#DEBUGPRINT(f'difference {str(S)}')
-		#DEBUGPRINT(f'           {str(realsize)}')
-		ret = [Q-P for Q,P in zip(S,realsize)]
-		#DEBUGPRINT(f'           {ret}')
-		return [Q-P for Q,P in zip(S,realsize)]
+	# def difference(S,realsize):
+	# 	#DEBUGPRINT(f'difference {str(S)}')
+	# 	#DEBUGPRINT(f'           {str(realsize)}')
+	# 	ret = [Q-P for Q,P in zip(S,realsize)]
+	# 	#DEBUGPRINT(f'           {ret}')
+	# 	return [Q-P for Q,P in zip(S,realsize)]
 
 	def duplicate(S):
 		return WindowFrame(S)
@@ -200,7 +207,7 @@ class WindowFrame(list):
 		S.shrink(-pixels)
 
 	def subtract_panel(S,panel):
-		if not S.common(panel):
+		if not S.common_area(panel):
 			return
 		#DEBUGPRINT(f'S     {str(WindowFrame(S))}')
 		w,h=panel.width_heigth()
@@ -227,6 +234,11 @@ class WindowFrame(list):
 		if x < Sx0 or x > Sx1: return False
 		if y < Sy0 or y > Sy1: return False
 		return True
+
+	def manhattan_distance(S,O):
+		Sx0,Sy0,Sx1,Sy1=S
+		Ox0,Oy0,Ox1,Oy1=O
+		return manhattan_distance(Sx0,Sy0,Ox0,Oy0) + manhattan_distance(Sx1,Sy1,Ox1,Oy1)
 
 	def divide_width(S):
 		#DEBUGPRINT (f'divide_width')
@@ -293,25 +305,25 @@ class WindowFrame(list):
 		x1,y1,x2,y2=S
 		return x1,y1,x2-x1,y2-y1
 
-	def common_frame(S,O:"WindowFrame")->"WindowFrame":
-		Slux,Sluy,Srlx,Srly=S
-		Olux,Oluy,Orlx,Orly=O
+	# def common_area(S,O:"WindowFrame")->"WindowFrame":
+	# 	Slux,Sluy,Srlx,Srly=S
+	# 	Olux,Oluy,Orlx,Orly=O
+	#
+	# 	# Determine the edges of the overlapping region
+	# 	left_edge   = max(Slux,Olux)
+	# 	right_edge  = min(Srlx,Orlx)
+	# 	top_edge    = max(Sluy,Oluy)
+	# 	bottom_edge = min(Srly,Orly)
+	#
+	# 	# Calculate the width and height of the overlap
+	# 	overlap_width  = right_edge - left_edge
+	# 	overlap_height = bottom_edge - top_edge
+	# 	# Check if there is an overlap
+	# 	if overlap_width <= 0 or overlap_height <= 0:
+	# 		return None  # No overlap
+	# 	return WindowFrame(left_edge,top_edge,right_edge,bottom_edge )
 
-		# Determine the edges of the overlapping region
-		left_edge   = max(Slux,Olux)
-		right_edge  = min(Srlx,Orlx)
-		top_edge    = max(Sluy,Oluy)
-		bottom_edge = min(Srly,Orly)
-
-		# Calculate the width and height of the overlap
-		overlap_width  = right_edge - left_edge
-		overlap_height = bottom_edge - top_edge
-		# Check if there is an overlap
-		if overlap_width <= 0 or overlap_height <= 0:
-			return None  # No overlap
-		return WindowFrame(left_edge,top_edge,right_edge,bottom_edge )
-
-	def common(S,O:"WindowFrame")->int:
+	def common_area(S,O:"WindowFrame")->int:
 		Slux,Sluy,Srlx,Srly=S
 		Olux,Oluy,Orlx,Orly=O
 
@@ -330,7 +342,7 @@ class WindowFrame(list):
 		# Calculate the area of the overlapping region
 		return overlap_width * overlap_height
 
-def group_by_common_aeria(herders,flok):
+def group_by_common_area(herders,flok):
 	count=len(herders)
 	range_herders=range(0,count)
 	pen = [ [] for _ in range_herders]
@@ -339,7 +351,7 @@ def group_by_common_aeria(herders,flok):
 		best_herder=-1
 		best_pasture=-1
 		for herder,i in zip(herders,range_herders):
-			pasture=herder.common(sheep)
+			pasture=herder.common_area(sheep)
 			if pasture > best_pasture:
 				best_herder=i
 				best_pasture=pasture
@@ -362,7 +374,38 @@ def make_match_in_heaven(virgins,suitors):
 	genesis=[]
 	for virgin in virgins:
 		for suitor in suitors:
-			dowry=virgin.common(suitor)
+			dowry=virgin.common_area(suitor)
+			genesis.append((virgin,suitor,dowry))
+	genesis.sort(key=lambda tup: -tup[DOWRY])
+	#DEBUGPRINT(f'{genesis=}')
+	heaven=deque(genesis)
+	paradise=deque()
+	#DEBUGPRINT(f'{heaven=}')
+	while True:
+		pair=heaven.pop()
+		paradise.append(Lite(pair[VIRGIN].get_id(),pair[VIRGIN].get_desktop(),pair[SUITOR]))
+		if not heaven:
+			return paradise
+		new_heaven=deque()
+		bride=pair[VIRGIN]
+		groom=pair[SUITOR]
+		for single_pair in heaven:
+			if bride == single_pair[VIRGIN]:
+				continue
+			if groom == single_pair[SUITOR]:
+				continue
+			new_heaven.append(single_pair)
+		heaven=new_heaven
+
+def make_match_in_manhattan(virgins,suitors):
+	VIRGIN=0 ; SUITOR=1 ; DOWRY = 2
+	lo=len(virgins) ; ln=len(suitors)
+	if lo!=ln:
+		raise ValueError ('best_match "virgins" and "suitors" must come in equal numbers.')
+	genesis=[]
+	for virgin in virgins:
+		for suitor in suitors:
+			dowry=virgin.manhattan_distance(suitor)
 			genesis.append((virgin,suitor,dowry))
 	genesis.sort(key=lambda tup: -tup[DOWRY])
 	#DEBUGPRINT(f'{genesis=}')
@@ -594,7 +637,7 @@ class Lunettes:
 	def divide_lites(S):
 		#DEBUGPRINT(f'divide_lites {S=}')
 		front_lites=S.get_surface_lites()
-		lite_division=group_by_common_aeria(S.screens,front_lites)
+		lite_division=group_by_common_area(S.screens,front_lites)
 		# for div in lite_division:
 		# 	#DEBUGPRINT(div)
 
@@ -604,7 +647,8 @@ class Lunettes:
 			if not wanted_frames:
 				continue
 			screen_tiles=screen.frame_divide(wanted_frames)
-			matched=make_match_in_heaven(lites,screen_tiles)
+			#matched=make_match_in_heaven(lites,screen_tiles)
+			matched = make_match_in_manhattan(lites, screen_tiles)
 			for match in matched:
 				match.place()
 				#DEBUGPRINT(f'{str(match )}')
