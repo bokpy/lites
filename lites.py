@@ -209,25 +209,43 @@ class WindowFrame(list):
 	def subtract_panel(S,panel):
 		if not S.common_area(panel):
 			return
-		#DEBUGPRINT(f'S     {str(WindowFrame(S))}')
 		w,h=panel.width_heigth()
-		#DEBUGPRINT(f'panel {str(panel)} {w:4} {h:4}')
+		Sx0,Sy0,Sx1,Sy1=S
+		Ox0,Oy0,Ox1,Oy1=panel
+		if w > h: # horizontal
+			if Sy0==Oy0: # top horizontal
+				S[1]=Oy1
+				return
+			S[3]=Oy0
+			return
+		# vertical
+		if Sx0==Ox0: # Left
+			S[0]=Ox1
+			return
+		S[2]=Ox0
 
-		SminX,SminY,SmaxX,SmaxY=S
-		T___X,T___Y,B___X,B___Y=panel
-		if w > h: # horizonal panel
-			if between(T___Y,SminY,B___Y): # top panel
-				S.set(SminX,B___Y,SmaxX,SmaxY)
-				return
-			if between(T___Y,SmaxY,B___Y): # bottom panel
-				S.set(SminX,SminY,SmaxX,T___Y)
-				return
-		if between(T___X,SminX,B___X): # left panel
-			S.set(B___X,SminY,SmaxX,SmaxY)
-			return
-		if between(T___X,SmaxX,B___X): # right panel
-			S.set(SminX,SminY,T___X,SmaxY)
-			return
+	# def subtract_panel(S,panel):
+	# 	if not S.common_area(panel):
+	# 		return
+	# 	#DEBUGPRINT(f'S     {str(WindowFrame(S))}')
+	# 	w,h=panel.width_heigth()
+	# 	#DEBUGPRINT(f'panel {str(panel)} {w:4} {h:4}')
+	#
+	# 	SminX,SminY,SmaxX,SmaxY=S
+	# 	T___X,T___Y,B___X,B___Y=panel
+	# 	if w > h: # horizonal panel
+	# 		if between(T___Y,SminY,B___Y): # top panel
+	# 			S.set(SminX,B___Y,SmaxX,SmaxY)
+	# 			return
+	# 		if between(T___Y,SmaxY,B___Y): # bottom panel
+	# 			S.set(SminX,SminY,SmaxX,T___Y)
+	# 			return
+	# 	if between(T___X,SminX,B___X): # left panel
+	# 		S.set(B___X,SminY,SmaxX,SmaxY)
+	# 		return
+	# 	if between(T___X,SmaxX,B___X): # right panel
+	# 		S.set(SminX,SminY,T___X,SmaxY)
+	# 		return
 
 	def holds(S,x,y):
 		Sx0,Sy0,Sx1,Sy1=S
@@ -494,7 +512,7 @@ class Lite(WindowFrame):
 		y+=north
 		w-=(east+west)
 		h-=(north+south)
-		#DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
+		DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
 		service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
 
 class Monitor(WindowFrame):
@@ -530,7 +548,9 @@ class Lunettes:
 		panels=[panel for panel in S.lites if panel.desk < 0] # displayed on all screen leave them alone
 		for screen in S.screens:
 			for panel in panels:
+				#DEBUGPRINT(f'{str(screen)} minus {panel} ')
 				screen.subtract_panel(panel)
+				#DEBUGPRINT(f'result {str(screen)}\n')
 		#DEBUGPRINT(str(S))
 
 	def __str__(S):
