@@ -6,6 +6,9 @@ import re
 from services import DEBUGPRINT
 
 #B=4 # border width
+def squared_distance(x0,y0,x1,y1):
+	dx=x0-x1 ; dy=y0-y1
+	return dx*dx + dy*dy
 
 #Id_re     =r'Window id: *(0x\d+)'
 AulX_re     =r'Absolute upper-left X: *(\d+)'
@@ -284,31 +287,74 @@ class WindowFrame(list):
 		#DEBUGPRINT (f'ret/2 : {str(ret)}')
 		return ret
 
-	def frame_divide(S,parts):
-		pieces=[]
-		def divide(frame,P):
-			P1=P//2
-			P2=P-P1
-			#DEBUGPRINT(f'{P=:<2}{P1=:<2}{P2=:<2}')
-			if P<1 :
+	def frame_divide(S, parts):
+		pieces = []
+
+		def divide(frame, P):
+			P1 = P // 2
+			P2 = P - P1
+			# DEBUGPRINT(f'{P=:<2}{P1=:<2}{P2=:<2}')
+			if P < 1:
 				return
-			if P==1:
-				#DEBUGPRINT('Append')
+			if P == 1:
+				# DEBUGPRINT('Append')
 				pieces.append(frame)
 				return
-			w,h=frame.width_heigth()
+			w, h = frame.width_heigth()
 			# this is gold 89 55
-			if w*5 < h*6:
-				half=frame.divide_heigth()
+			if w * 5 < h * 6:
+				half = frame.divide_heigth()
 			else:
-				half=frame.divide_width()
-			divide(frame,P1)
-			divide(half ,P2)
-		frame=S.duplicate()
-		divide(frame,parts)
+				half = frame.divide_width()
+			divide(frame, P1)
+			divide(half, P2)
+
+		frame = S.duplicate()
+		divide(frame, parts)
 		if len(pieces) != parts:
-			raise RuntimeError (f'frame_divide({parts=}) made {len(pieces)} parts')
-		#DEBUGPRINT(f'frame_divide({parts=}) made {len(pieces)} parts')
+			raise RuntimeError(f'frame_divide({parts=}) made {len(pieces)} parts')
+		# DEBUGPRINT(f'frame_divide({parts=}) made {len(pieces)} parts')
+		return pieces
+
+	def ratio_divide(S, parts):
+		pieces = []
+		def divide(frame, P):
+			if P < 1:
+				return
+			if P == 1:
+				# DEBUGPRINT('Append')
+				pieces.append(frame)
+				return
+			P1 = P // 2
+			P2 = P - P1
+			w, h = frame.width_heigth()
+			if P1 == P2: # even parts divide in two
+			# DEBUGPRINT(f'{P=:<2}{P1=:<2}{P2=:<2}')
+				if w < h :
+					half = frame.divide_heigth()
+				else:
+					half = frame.divide_width()
+			else: # odd parts divide 1 : 2 ratio
+				# P2 > P1
+				ominx,ominy,omaxx,omaxy=frame
+				splitXmid = ( w*P2 //P)  + ominx
+				splitYmid = ( h*P2 //P)  + ominy
+				if squared_distance(ominx,ominy,splitXmid,omaxy) > squared_distance(ominx,ominy,omaxx,splitYmid):
+					# horizontal split gives the shortest diagonal is prefered
+					frame.set(ominx,ominy,omaxx,splitYmid)
+					half = WindowFrame(ominx,splitYmid+1,omaxx,omaxy)
+				else:
+					frame.set(ominx,ominy,splitXmid,omaxy)
+					half = WindowFrame(splitXmid+1,ominy,omaxx,omaxy)
+
+			divide(frame, P2)
+			divide(half, P1)
+
+		frame = S.duplicate()
+		divide(frame, parts)
+		if len(pieces) != parts:
+			raise RuntimeError(f'frame_divide({parts=}) made {len(pieces)} parts')
+		# DEBUGPRINT(f'frame_divide({parts=}) made {len(pieces)} parts')
 		return pieces
 
 	def size(S):
@@ -666,7 +712,8 @@ class Lunettes:
 			wanted_frames=len(lites)
 			if not wanted_frames:
 				continue
-			screen_tiles=screen.frame_divide(wanted_frames)
+			#screen_tiles=screen.frame_divide(wanted_frames)
+			screen_tiles = screen.ratio_divide(wanted_frames)
 			#matched=make_match_in_heaven(lites,screen_tiles)
 			matched = make_match_in_manhattan(lites, screen_tiles)
 			for match in matched:
