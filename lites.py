@@ -83,6 +83,15 @@ def xwininfo_tree_ids():
 		ids.append(int(id_list[0]))
 	return ids
 
+geometry_re=re.compile(r'\D*(\d+)x(\d+)(.\d+).(.\d+).*')
+def xwininfo_corners(id):
+	#-geometry 1076x1305+1178--58
+	for line in service_call("xwininfo", "-id", str(id)):
+		if '-geometry' in line:
+			break
+	match=geometry_re.match(line)
+	return [int(x) for x in match.groups() ]
+
 #re_region=re.compile(r'^_NET_WM_OPAQUE_REGION\(CARDINAL\) =\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+).*')
 re_region  = re.compile(r'^_NET_WM_OPAQUE_REGION\D*(\d+)\D*(\d+)\D*(\d+)\D*(\d+).*')
 
@@ -560,7 +569,12 @@ class Lite(WindowFrame):
 		h-=(north+south)
 		DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
 		service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
+		_,_,_,Y=xwininfo_corners(S.id)
+		if Y < 0:
+			DEBUGPRINT(f'corection {Y=}')
+			service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y+Y},{w},{h}" )
 
+#-geometry 1076x1305+1178--58
 class Monitor(WindowFrame):
 	count=-1
 	def __init__(S,name,x,y,w,h):
