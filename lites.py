@@ -5,6 +5,14 @@ import re
 
 from services import DEBUGPRINT
 
+pseudo_toss=deque([56, 22, 60, 71, 50, 66, 90, 0, 26, 64, 98, 14, 12, 8, 73, 4, 7, 45, 0, 36, 76, 4, 85, 42, 65, 67, 66, 23, 11, 67, 56, 27, 77, 39, 0, 27, 9, 53, 72, 82, 50, 18, 15, 74, 69, 55, 71, 18, 48, 21, 2, 73, 67, 32, 44, 12, 35, 44, 61, 4, 0, 33, 62, 98, 79, 76, 83, 73, 39, 40, 20, 42, 15, 59, 95, 40, 20, 27, 40, 36, 14, 41])
+def somewhat_random():
+	for _ in range(0,3):
+		val=pseudo_toss.pop()
+		pseudo_toss.appendleft(val)
+		#DEBUGPRINT(f'somewhat_random {val}')
+	return val
+
 #B=4 # border width
 def squared_distance(x0,y0,x1,y1):
 	dx=x0-x1 ; dy=y0-y1
@@ -84,13 +92,38 @@ def xwininfo_tree_ids():
 	return ids
 
 geometry_re=re.compile(r'\D*(\d+)x(\d+)(.\d+).(.\d+).*')
-def xwininfo_corners(id):
+def xwininfo_geometry(id):
 	#-geometry 1076x1305+1178--58
 	for line in service_call("xwininfo", "-id", str(id)):
 		if '-geometry' in line:
 			break
 	match=geometry_re.match(line)
-	return [int(x) for x in match.groups() ]
+	return [int(x) for x in match.groups()]
+
+def xwininfo_corners(id):
+	for line in service_call("xwininfo", "-id", str(id)):
+		if 'Corners:' in line:
+			return parse_xwininfo_corners(line)
+
+# 	match=geometry_re.match(line)
+# 	return [int(x) for x in match.groups() ]
+corner_re=re.compile(r"([-+]?\d+)([-+]\d+)")
+def parse_xwininfo_corners(corners_string):
+	matches =corner_re.findall(corners_string)
+	DEBUGPRINT(f'{matches=}')	# Extract each corner's coordinates as (x, y) tuples
+	X0 = int(matches[0][0])
+	Y0 = int(matches[0][1])
+	X1 = int(matches[1][0])
+	Y1 = int(matches[1][1])
+	return X0,Y0,X1,Y1
+
+# # Example usage
+# xwininfo_output = "Corners:  +3466+23  -26+23  -26-29  +3466-29"
+# upper_left, lower_right = parse_xwininfo_corners(xwininfo_output)
+#
+# print(f"Upper Left: {upper_left}")
+# print(f"Lower Right: {lower_right}")
+
 
 #re_region=re.compile(r'^_NET_WM_OPAQUE_REGION\(CARDINAL\) =\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+).*')
 re_region  = re.compile(r'^_NET_WM_OPAQUE_REGION\D*(\d+)\D*(\d+)\D*(\d+)\D*(\d+).*')
@@ -196,6 +229,9 @@ class WindowFrame(list):
 	def __str__(S):
 		x0,y0,x1,y1=S
 		return f'[{x0:5},{y0:5}][{x1:5},{y1:5}]'
+
+	def points_str(S):
+		return f'{S[0]:4},{S[1]:4},{S[2]:4},{S[3]:4}'
 
 	def corners(S):
 		x0,y0,x1,y1=S
@@ -478,7 +514,8 @@ def make_match_in_manhattan(virgins,suitors):
 	genesis=[]
 	for virgin in virgins:
 		for suitor in suitors:
-			dowry=virgin.manhattan_distance(suitor)
+			# somewhat_random() as tie breaker for windows that overlap exactly.
+			dowry=virgin.manhattan_distance(suitor)+somewhat_random()
 			genesis.append((virgin,suitor,dowry))
 	genesis.sort(key=lambda tup: -tup[DOWRY])
 	#DEBUGPRINT(f'{genesis=}')
@@ -560,6 +597,7 @@ class Lite(WindowFrame):
 		return True
 
 	def place(S):
+		DEBUGPRINT(f'\nplace {S.points_str()}')
 		# wmctrl -i -r 0x0340003e -e '0,3500,100,500,700'
 		east,west,north,south=xprop_borders(S.id)
 		x, y, w, h = S.x_y_width_heigth()
@@ -567,12 +605,25 @@ class Lite(WindowFrame):
 		y+=north
 		w-=(east+west)
 		h-=(north+south)
-		DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4}')
+		DEBUGPRINT(f'at [{x:4},{y:4}] {w:4}x{h:4} after border correction.')
 		service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
-		_,_,_,Y=xwininfo_corners(S.id)
-		if Y < 0:
-			DEBUGPRINT(f'corection {Y=}')
-			service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y+Y},{w},{h}" )
+		dX0,dY0,dX1,dY1=xwininfo_corners(S.id)
+		# DEBUGPRINT(f'{S.points_str()} was wanted.')
+		DEBUGPRINT(f'Corner delta {dX0=},{dY0=},{dX1=},{dY1=}.')
+		a,b,s,t=xwininfo_geometry(S.id)
+		DEBUGPRINT(f'geometry:{ a=},{b=},{s=},{t=}' )
+		correct=False
+		if s < 0:
+			correct=True
+			x=x+s
+		if t < 0:
+			correct=True
+			y=y+t
+		if correct:
+			service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y},{w},{h}" )
+		# if dY1 < 0:
+		# 	DEBUGPRINT(f'corection {dY1=}')
+		# 	service_call('wmctrl','-i', '-r',str(S.id), '-e', f"0,{x},{y+dY1},{w},{h}" )
 
 #-geometry 1076x1305+1178--58
 class Monitor(WindowFrame):
