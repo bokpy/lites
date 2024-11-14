@@ -507,10 +507,20 @@ def make_match_in_heaven(virgins,suitors):
 		heaven=new_heaven
 
 def make_match_in_manhattan(virgins,suitors):
+	"""
+	Find each "virgin" a "suitor" clossed arround the corner.
+	"dowry" is the manhattan distance = virgin(left,top) to suitor(left,top) + virgin(right,bottom) to suitor(right,bottom)
+	modern times small "dowry" best match.
+	:param virgins: lites on display on a desktop screen
+	:param suitors: frames dividing the screen
+	:return: list of best matches best
+	"""
 	VIRGIN=0 ; SUITOR=1 ; DOWRY = 2
 	lo=len(virgins) ; ln=len(suitors)
 	if lo!=ln:
 		raise ValueError ('best_match "virgins" and "suitors" must come in equal numbers.')
+
+	# calculate the "dowry" for each possible pair
 	genesis=[]
 	for virgin in virgins:
 		for suitor in suitors:
@@ -522,21 +532,20 @@ def make_match_in_manhattan(virgins,suitors):
 	heaven=deque(genesis)
 	paradise=deque()
 	#DEBUGPRINT(f'{heaven=}')
-	while True:
+	while heaven:
 		pair=heaven.pop()
 		paradise.append(Lite(pair[VIRGIN].get_id(),pair[VIRGIN].get_desktop(),pair[SUITOR]))
 		if not heaven:
-			return paradise
-		new_heaven=deque()
-		bride=pair[VIRGIN]
-		groom=pair[SUITOR]
-		for single_pair in heaven:
-			if bride == single_pair[VIRGIN]:
+			break
+		# remove the losing matches with the "virgin" or "suitor" of the happy couple
+		batchelors=deque()
+		while heaven:
+			pair_of_singles=heaven.pop()
+			if (pair_of_singles[VIRGIN] == pair[VIRGIN]) or (pair_of_singles[SUITOR] == pair[SUITOR]):
 				continue
-			if groom == single_pair[SUITOR]:
-				continue
-			new_heaven.append(single_pair)
-		heaven=new_heaven
+			batchelors.appendleft(pair_of_singles)
+		heaven=batchelors
+	return paradise
 
 class Lite(WindowFrame):
 		# S.id='0x01800003'
