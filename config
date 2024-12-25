@@ -1,0 +1,13 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+	logallrefupdates = true
+[remote "origin"]
+	url = /home/bob/python/lites/../lites_save_parent/lites
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "master"]
+	remote = origin
+	merge = refs/heads/master
+[receive]
+	denyCurrentBranch = ignore
